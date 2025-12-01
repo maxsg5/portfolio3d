@@ -392,7 +392,7 @@ const mast = new THREE.Mesh(
   new THREE.CylinderGeometry(0.12, 0.12, 4.6, 8),
   new THREE.MeshToonMaterial({ color: 0xf5f5f5 })
 );
-mast.position.set(0, 2.3, 0);
+mast.position.set(0, 2.3, -1.20);
 mast.castShadow = true;
 boat.add(mast);
 
@@ -401,7 +401,7 @@ const sail = new THREE.Mesh(
   new THREE.MeshToonMaterial({ color: 0xffffff, side: THREE.DoubleSide })
 );
 sail.position.set(0, 2.4, -1.25);
-sail.rotation.y = Math.PI / 2;
+sail.rotation.y = Math.PI;
 sail.castShadow = true;
 boat.add(sail);
 

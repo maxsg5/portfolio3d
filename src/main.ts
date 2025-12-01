@@ -31,7 +31,7 @@ const biomes: Biome[] = [
     accentColor: 0x7c6553,
     leafColor: 0x37b26f,
     trunkColor: 0x8a5a44,
-    waterTint: 0x51d6d3,
+    waterTint: 0x18ffc7,
     description:
       'Warm sands, turquoise shallows, and palms swaying in a steady trade wind.',
   },
@@ -43,7 +43,7 @@ const biomes: Biome[] = [
     accentColor: 0xbcccdc,
     leafColor: 0xcde7ff,
     trunkColor: 0xd7e5f4,
-    waterTint: 0x9ed4ff,
+    waterTint: 0xb9ecff,
     description:
       'Frosted rock with snow caps and glassy blue water drifting with ice.',
   },
@@ -55,7 +55,7 @@ const biomes: Biome[] = [
     accentColor: 0xb98b54,
     leafColor: 0xc7b079,
     trunkColor: 0xa0723d,
-    waterTint: 0x5ac2ff,
+    waterTint: 0x3a96ff,
     description: 'Sun-bleached dunes and rocky outcrops with crisp blue edges.',
   },
 ];
@@ -133,10 +133,11 @@ const waterGeometry = new THREE.PlaneGeometry(
   waterSegments,
   waterSegments
 );
-const baseWaterColor = new THREE.Color(0x6bd8ff);
+// Brighter base water; vertex colors carry the final tint
+const baseWaterColor = new THREE.Color(0x6fd5ff);
 const waterMaterial = new THREE.MeshToonMaterial({
   color: baseWaterColor,
-  emissive: 0x0a2a45,
+  emissive: 0x0d3555,
   vertexColors: true,
 });
 const water = new THREE.Mesh(waterGeometry, waterMaterial);
@@ -410,7 +411,7 @@ function tintWaterVertices() {
       const influence = island.radius * 3.0;
       if (d < influence) {
         const w = THREE.MathUtils.smoothstep(1 - d / influence, 0, 1);
-        base.lerp(new THREE.Color(island.biome.waterTint), w * 0.75);
+        base.lerp(new THREE.Color(island.biome.waterTint), w * 0.7);
       }
     });
 
@@ -424,6 +425,8 @@ function tintWaterVertices() {
 }
 
 tintWaterVertices();
+
+// Utility to retint water if we tweak palettes later (currently only called once)
 
 // UI helpers
 function showSpeech(island: Island | null) {

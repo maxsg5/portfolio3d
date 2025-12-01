@@ -31,7 +31,7 @@ const biomes: Biome[] = [
     accentColor: 0x7c6553,
     leafColor: 0x37b26f,
     trunkColor: 0x8a5a44,
-    waterTint: 0x18ffc7,
+    waterTint: 0x51d6d3,
     description:
       'Warm sands, turquoise shallows, and palms swaying in a steady trade wind.',
   },
@@ -43,7 +43,7 @@ const biomes: Biome[] = [
     accentColor: 0xbcccdc,
     leafColor: 0xcde7ff,
     trunkColor: 0xd7e5f4,
-    waterTint: 0xb9ecff,
+    waterTint: 0x9ed4ff,
     description:
       'Frosted rock with snow caps and glassy blue water drifting with ice.',
   },
@@ -55,7 +55,7 @@ const biomes: Biome[] = [
     accentColor: 0xb98b54,
     leafColor: 0xc7b079,
     trunkColor: 0xa0723d,
-    waterTint: 0x3a96ff,
+    waterTint: 0x5ac2ff,
     description: 'Sun-bleached dunes and rocky outcrops with crisp blue edges.',
   },
 ];
@@ -124,22 +124,106 @@ scene.add(sun);
 
 scene.add(new THREE.HemisphereLight(0x8fc4ff, 0x1b2533, 0.45));
 
-// Water
-const waterSize = 140;
-const waterSegments = 140;
+// Water (shader with UV scale to avoid zoomed look)
+const waterSize = 240;
+const waterSegments = 240; // more verts so waves/tiled details aren't chunky
 const waterGeometry = new THREE.PlaneGeometry(
   waterSize,
   waterSize,
   waterSegments,
   waterSegments
 );
-// Brighter base water; vertex colors carry the final tint
-const baseWaterColor = new THREE.Color(0x6fd5ff);
-const waterMaterial = new THREE.MeshToonMaterial({
-  color: baseWaterColor,
-  emissive: 0x0d3555,
-  vertexColors: true,
+const baseWaterColor = new THREE.Color(0x2acbff);
+
+
+const waterUniforms = {
+  uTime: { value: 0 },
+  uShallow: { value: new THREE.Color(0x3bb9ff) },
+  uDeep: { value: new THREE.Color(0x0a1f44) },
+  uFoam: { value: new THREE.Color(0xffffff) },
+  uSky: { value: new THREE.Color(0x7ec8ff) },
+  uLightDir: { value: new THREE.Vector3(0.4, 1.0, 0.25).normalize() },
+  uUVScale: { value: 10.0 }, // stronger tiling so shader pattern isn't zoomed in
+};
+
+const waterMaterial = new THREE.ShaderMaterial({
+  uniforms: waterUniforms,
+  vertexShader: `
+    precision highp float;
+    varying vec3 vWorldPos;
+    varying vec3 vNormal;
+    varying vec2 vUv;
+    uniform float uTime;
+    uniform float uUVScale;
+
+    // simple hash
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
+
+    void main() {
+      vUv = uv * uUVScale;
+      vec3 pos = position;
+      float t = uTime * 0.6;
+      float wave1 = sin(pos.x * 0.18 + t * 2.0);
+      float wave2 = cos(pos.z * 0.22 + t * 1.6);
+      float wave3 = sin((pos.x + pos.z) * 0.12 - t * 1.4);
+      pos.y += (wave1 + wave2 + wave3) * 0.35;
+      pos.y += hash(pos.xz * 0.05 + t) * 0.08;
+
+      // approximate normal via gradient of displacement
+      float dWx = cos(pos.x * 0.18 + t * 2.0) * 0.18 * 2.0
+                + cos((pos.x + pos.z) * 0.12 - t * 1.4) * 0.12;
+      float dWz = -sin(pos.z * 0.22 + t * 1.6) * 0.22 * 1.6
+                + cos((pos.x + pos.z) * 0.12 - t * 1.4) * 0.12;
+      vec3 n = normalize(vec3(-dWx, 1.0, -dWz));
+
+      vec4 world = modelMatrix * vec4(pos, 1.0);
+      vWorldPos = world.xyz;
+      vNormal = normalize(mat3(normalMatrix) * n);
+      gl_Position = projectionMatrix * viewMatrix * world;
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    varying vec3 vWorldPos;
+    varying vec3 vNormal;
+    varying vec2 vUv;
+    uniform vec3 uShallow;
+    uniform vec3 uDeep;
+    uniform vec3 uFoam;
+    uniform vec3 uSky;
+    uniform vec3 uLightDir;
+    uniform float uTime;
+
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
+
+    void main() {
+      float depth = clamp(1.0 - abs(vWorldPos.y) * 0.08, 0.0, 1.0);
+      float shade = 0.7 + 0.3 * dot(normalize(vNormal), normalize(uLightDir));
+      vec3 base = mix(uDeep, uShallow, depth);
+
+      float foam = smoothstep(0.18, 0.3, vWorldPos.y);
+      float ripple = sin(vUv.x * 30.0 + uTime * 3.5) * 0.5 + 0.5;
+      foam *= ripple;
+
+      vec3 viewDir = normalize(cameraPosition - vWorldPos);
+      float fres = pow(1.0 - max(dot(viewDir, normalize(vNormal)), 0.0), 3.0);
+
+      vec3 color = base * shade;
+      color = mix(color, uSky, fres * 0.3);
+      color = mix(color, uFoam, foam * 0.8);
+
+      float fog = clamp(length(vWorldPos) / 350.0, 0.0, 1.0);
+      color = mix(color, uSky, fog * 0.1);
+
+      gl_FragColor = vec4(color, 0.9);
+    }
+  `,
+  transparent: true,
+  side: THREE.DoubleSide,
+  depthWrite: false,
+  depthTest: true,
 });
+
 const water = new THREE.Mesh(waterGeometry, waterMaterial);
 water.rotation.x = -Math.PI / 2;
 water.receiveShadow = true;
@@ -334,6 +418,65 @@ const turnRate = 1.8; // radians per second
 const damping = 0.96;
 const boatRadius = 1.6;
 let modalOpen = false;
+// Wake particles
+const wakeCount = 80;
+const wakeLife = 1.8;
+const wakePool: { mesh: THREE.Mesh; age: number; alive: boolean }[] = [];
+const wakeMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffffff,
+  transparent: true,
+  opacity: 0.5,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+});
+function initWake() {
+  const geo = new THREE.PlaneGeometry(0.8, 0.8);
+  for (let i = 0; i < wakeCount; i++) {
+    const m = new THREE.Mesh(geo, wakeMaterial.clone());
+    m.rotation.x = -Math.PI / 2;
+    m.visible = false;
+    scene.add(m);
+    wakePool.push({ mesh: m, age: 0, alive: false });
+  }
+}
+initWake();
+let wakeTimer = 0;
+
+const waveDir1 = new THREE.Vector2(1, 0.2).normalize();
+const waveDir2 = new THREE.Vector2(-0.4, 1).normalize();
+const waveDir3 = new THREE.Vector2(0.7, -0.6).normalize();
+
+function updateWake(delta: number) {
+  wakeTimer += delta;
+  if (boatSpeed > 1 && wakeTimer > 0.08) {
+    const slot = wakePool.find((p) => !p.alive);
+    if (slot) {
+      const dir = new THREE.Vector3(Math.sin(boatHeading), 0, Math.cos(boatHeading));
+      slot.mesh.position.copy(boat.position).addScaledVector(dir, -1.2);
+      slot.mesh.position.y = 0.02;
+      slot.mesh.visible = true;
+      slot.mesh.scale.setScalar(0.6);
+      slot.age = 0;
+      slot.alive = true;
+    }
+    wakeTimer = 0;
+  }
+
+  wakePool.forEach((p) => {
+    if (!p.alive) return;
+    p.age += delta;
+    const t = p.age / wakeLife;
+    if (t >= 1) {
+      p.mesh.visible = false;
+      p.alive = false;
+      return;
+    }
+    const fade = 1 - t;
+    (p.mesh.material as THREE.MeshBasicMaterial).opacity = 0.45 * fade;
+    const s = 0.6 + t * 1.4;
+    p.mesh.scale.setScalar(s);
+  });
+}
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && modalOpen) {
@@ -372,28 +515,33 @@ const wind = new THREE.Points(windGeometry, windMaterial);
 scene.add(wind);
 
 // Birds
-type Bird = { mesh: THREE.Object3D; radius: number; speed: number; height: number; offset: number };
+type Bird = { mesh: THREE.Mesh; orbitR: number; speed: number; height: number; phase: number; wobble: number };
 const birds: Bird[] = [];
-function createBird(radius: number, speed: number, height: number) {
-  const body = new THREE.Mesh(
-    new THREE.ConeGeometry(0.35, 0.9, 4),
-    new THREE.MeshToonMaterial({ color: 0xf0f4ff })
-  );
-  body.rotation.x = Math.PI / 2;
-  body.castShadow = true;
-  const bird: Bird = {
-    mesh: body,
-    radius,
-    speed,
-    height,
-    offset: Math.random() * Math.PI * 2,
-  };
-  scene.add(body);
-  birds.push(bird);
+function initBirds() {
+  const configs = [
+    { r: 14, speed: 0.5, h: 9, wobble: 0.4 },
+    { r: 18, speed: 0.35, h: 11, wobble: 0.6 },
+    { r: 22, speed: 0.4, h: 10, wobble: 0.5 },
+  ];
+  configs.forEach((c) => {
+    const body = new THREE.Mesh(
+      new THREE.ConeGeometry(0.35, 0.9, 4),
+      new THREE.MeshToonMaterial({ color: 0xf0f4ff })
+    );
+    body.rotation.x = Math.PI / 2;
+    body.castShadow = true;
+    scene.add(body);
+    birds.push({
+      mesh: body,
+      orbitR: c.r,
+      speed: c.speed,
+      height: c.h,
+      wobble: c.wobble,
+      phase: Math.random() * Math.PI * 2,
+    });
+  });
 }
-createBird(12, 0.6, 8);
-createBird(18, 0.45, 11);
-createBird(22, 0.5, 9.5);
+initBirds();
 
 // Water tint by biome influence
 function tintWaterVertices() {
@@ -411,7 +559,7 @@ function tintWaterVertices() {
       const influence = island.radius * 3.0;
       if (d < influence) {
         const w = THREE.MathUtils.smoothstep(1 - d / influence, 0, 1);
-        base.lerp(new THREE.Color(island.biome.waterTint), w * 0.7);
+        base.lerp(new THREE.Color(island.biome.waterTint), w * 0.75);
       }
     });
 
@@ -425,8 +573,6 @@ function tintWaterVertices() {
 }
 
 tintWaterVertices();
-
-// Utility to retint water if we tweak palettes later (currently only called once)
 
 // UI helpers
 function showSpeech(island: Island | null) {
@@ -535,17 +681,7 @@ function updateBoat(delta: number) {
 }
 
 function animateWater(time: number) {
-  const pos = waterGeometry.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
-    const wave =
-      Math.sin(x * 0.12 + time * 0.9) * 0.28 +
-      Math.cos(z * 0.14 + time * 0.85) * 0.25;
-    pos.setY(i, wave);
-  }
-  pos.needsUpdate = true;
-  waterGeometry.computeVertexNormals();
+  waterUniforms.uTime.value = time;
 }
 
 function animateWind(delta: number) {
@@ -568,13 +704,25 @@ function animateWind(delta: number) {
 }
 
 function animateBirds(time: number) {
-  birds.forEach((bird, index) => {
-    const angle = time * bird.speed + bird.offset;
-    const x = Math.cos(angle) * bird.radius;
-    const z = Math.sin(angle) * bird.radius;
-    bird.mesh.position.set(x, bird.height + Math.sin(angle * 2) * 0.4, z);
-    bird.mesh.rotation.y = -angle + Math.PI / 2;
-    bird.mesh.rotation.z = Math.sin(angle * 4) * 0.2;
+  birds.forEach((bird, i) => {
+    const angle = time * bird.speed + bird.phase;
+    const wobble = Math.sin(time * 2 + i) * bird.wobble;
+    const x = Math.cos(angle) * bird.orbitR;
+    const z = Math.sin(angle) * bird.orbitR;
+    const y = bird.height + Math.sin(angle * 1.3 + i) * 0.6;
+    const nextX = Math.cos(angle + 0.02) * bird.orbitR;
+    const nextZ = Math.sin(angle + 0.02) * bird.orbitR;
+    const nextY = bird.height + Math.sin((angle + 0.02) * 1.3 + i) * 0.6;
+    bird.mesh.position.set(x, y, z);
+
+    const vel = new THREE.Vector3(nextX - x, nextY - y, nextZ - z);
+    if (vel.lengthSq() > 0.0001) {
+      vel.normalize();
+      // Cone tip assumed along +Y in local space; align +Y to velocity
+      bird.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), vel);
+      // small bank about velocity
+      bird.mesh.rotateOnAxis(vel, wobble * 0.2);
+    }
   });
 }
 
@@ -619,6 +767,7 @@ function animate() {
   animateWater(elapsed);
   animateWind(delta);
   animateBirds(elapsed);
+  updateWake(delta);
   swayIslands(elapsed);
   updateProximityUI();
 
